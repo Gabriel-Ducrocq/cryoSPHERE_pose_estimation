@@ -72,6 +72,7 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
             for head in all_heads.module:
                 print("DIMDIN", head.out_dim)
                 predicted_pose = head(encoded_images_pose)
+                print(predicted_pose.shape)
                 all_poses_predicted.append(predicted_pose[:, None, :])
 
             all_poses_predicted = torch.concat(all_poses_predicted, dim=1)
