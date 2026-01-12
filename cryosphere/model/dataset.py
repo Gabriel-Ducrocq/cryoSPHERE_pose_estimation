@@ -17,8 +17,11 @@ class Mask(torch.nn.Module):
         super(Mask, self).__init__()
 
         mask = torch.lt(torch.linspace(-1, 1, im_size)[None]**2 + torch.linspace(-1, 1, im_size)[:, None]**2, rad**2)
+        mask_out = torch.gt(torch.linspace(-1, 1, im_size)[None] ** 2 + torch.linspace(-1, 1, im_size)[:, None] ** 2,
+                        rad ** 2)
         # float for pl ddp broadcast compatible
         self.register_buffer('mask', mask.float())
+        self.register_buffer("mask_out", mask_out)
         self.num_masked = torch.sum(mask).item()
 
     def forward(self, x):
