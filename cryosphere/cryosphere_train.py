@@ -86,7 +86,7 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
             posed_predicted_structures = renderer.rotate_structure(predicted_structures, rotation_matrices)
             predicted_images  = renderer.project(posed_predicted_structures, gmm_repr.sigmas, gmm_repr.amplitudes, grid)
             batch_predicted_images = renderer.apply_ctf(predicted_images, ctf, indexes)#/dataset.f_std
-            loss = compute_loss(batch_predicted_images, lp_batch_translated_images, None, latent_mean, latent_std, vae.module, segmenter.module, experiment_settings, tracking_metrics, 
+            loss, argmins = compute_loss(batch_predicted_images, lp_batch_translated_images, None, latent_mean, latent_std, vae.module, segmenter.module, experiment_settings, tracking_metrics,
                 structural_loss_parameters= structural_loss_parameters, epoch=epoch, predicted_structures=predicted_structures, device=gpu_id)
 
             loss.backward()
@@ -96,7 +96,9 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
         if scheduler:
             scheduler.step()
 
-        model.utils.monitor_training(segmentation, segmenter.module, tracking_metrics, experiment_settings, vae.module, backbone_network.module, all_heads.module, optimizer, predicted_images, batch_images, gpu_id)
+        model.utils.monitor_training(segmentation, segmenter.module, tracking_metrics, experiment_settings, vae.module,
+                                     backbone_network.module, all_heads.module, optimizer, predicted_images,
+                                     batch_images, gpu_id, argmins)
 
 
 def cryosphere_train():

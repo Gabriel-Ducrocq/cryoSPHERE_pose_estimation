@@ -358,7 +358,7 @@ def compute_loss(predicted_images, images, segmentation_image, latent_mean, late
                                         the target distances.
     :param predicted_structures: torch.tensor(N_batch, N_residues, 3) of predicted structures to compute the structural losses.
     :param device: torch device on which we perform the computations.
-    :return: torch.float32, average loss over the batch dimension
+    :return: torch.float32, average loss over the batch dimension, torch.tensor argmin for each batch sample
     """
     rmsd, argmins, rmsd_non_mean = calc_cor_loss(predicted_images, images, segmentation_image)
     KL_prior_latent = compute_KL_prior_latent(latent_mean, latent_std, experiment_settings["epsilon_kl"])
@@ -405,4 +405,4 @@ def compute_loss(predicted_images, images, segmentation_image, latent_mean, late
            + loss_weights["continuity_loss"]*continuity_loss \
            + loss_weights["clashing_loss"]*clashing_loss
 
-    return loss
+    return loss, argmins

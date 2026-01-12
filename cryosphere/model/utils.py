@@ -418,7 +418,7 @@ class SpatialGridTranslate(torch.nn.Module):
 
 
 def monitor_training(segmentation, segmenter, tracking_metrics, experiment_settings, vae, backbone_network, all_heads,
-                     optimizer, pred_im, true_im, gpu_id):
+                     optimizer, pred_im, true_im, gpu_id, argmins):
     """
     Monitors the training process through wandb and saving models. The metrics are logged into a file and optionnally sent to Weight and Biases.
     :param segmentation: torch.tensor(N_batch, N_residues, N_segments) weights of the segmentation
@@ -444,8 +444,7 @@ def monitor_training(segmentation, segmenter, tracking_metrics, experiment_setti
                 for l in range(segm["segmentation"].shape[-1]):
                     wandb.log({f"segments/{part}/segment_{l}": np.sum(hard_segments[0] == l)})
 
-
-            pred_im = pred_im[0].detach().cpu().numpy()[:, :, None]
+            pred_im = pred_im[0][argmins[0]].detach().cpu().numpy()[:, :, None]
             true_im = true_im[0].detach().cpu().numpy()[:, :, None]
             predicted_image_wandb = wandb.Image(pred_im, caption="Predicted image")
             true_image_wandb = wandb.Image(true_im, caption="True image")
