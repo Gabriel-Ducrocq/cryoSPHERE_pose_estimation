@@ -55,9 +55,6 @@ class MLPPose(nn.Module):
         self.flatten = nn.Flatten()
         self.type=network_type
         self.out_dim = out_dim
-        if network_type == "head":
-            print("OUTDIM", self.out_dim)
-
         self.output_ELU = torch.nn.ELU()
         assert type(intermediate_dim) == type([]), "intermediate_dim should be a list containing the size of the intermediate layers."
         self.num_hidden_layers = len(intermediate_dim)
