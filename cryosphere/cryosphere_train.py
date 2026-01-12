@@ -74,6 +74,7 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
                 all_poses_predicted.append(predicted_pose[:, None, :])
 
             all_poses_predicted = torch.concat(all_poses_predicted, dim=1)
+            print("SHAPE", all_poses_predicted.shape)
             predicted_r6 = all_poses_predicted[:, :, :]
             predicted_r6 = predicted_r6.reshape(batch_size, -1, 3, 2)
             rotation_matrices = roma.special_gramschmidt(predicted_r6)
