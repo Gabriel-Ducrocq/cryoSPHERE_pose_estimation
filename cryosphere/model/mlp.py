@@ -50,7 +50,7 @@ class MLPPose(nn.Module):
         :param device: torch device on which we perform the computations
         :param network_type: str, "encoder" of "decoder".
         """
-        super(MLP, self).__init__()
+        super(MLPPose, self).__init__()
         assert network_type in ["backbone", "head"]
         self.flatten = nn.Flatten()
         self.type=network_type
