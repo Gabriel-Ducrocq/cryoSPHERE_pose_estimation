@@ -19,7 +19,7 @@ from tqdm import tqdm
 import torch.nn.functional as F
 from scipy.spatial import distance
 from cryosphere.model.vae import VAE
-from cryosphere.model.mlp import MLP
+from cryosphere.model.mlp import MLP, MLPPose
 from cryosphere.model.ctf import CTF
 from biotite.structure.io.pdb import PDBFile
 #from pytorch3d.transforms import Transform3d
@@ -230,12 +230,28 @@ def parse_yaml(path, gpu_id, analyze=False):
     decoder = MLP(experiment_settings["latent_dimension"], n_total_segments*6,
                   experiment_settings["decoder"]["hidden_dimensions"], network_type="decoder", device=device)
 
+    backbone_network = MLPPose(Npix_downsize ** 2,
+                  experiment_settings["backbone_net"]["output_dimension"],
+                  experiment_settings["backbone_net"]["hidden_dimensions"], network_type="backbone", device=device)
+
+    all_heads = torch.nn.ModuleList([MLPPose(experiment_settings["head_net"]["input_dimension"],
+                  6, experiment_settings["head_net"]["hidden_dimensions"], network_type="head", device=device)
+                    for i in range(experiment_settings["N_heads"])])
+
+    if experiment_settings["resume_training"]["backbone"] is not None:
+        backbone_network.load_state_dict(torch.load(experiment_settings["resume_training"]["backbone"]))
+    if experiment_settings["resume_training"]["heads"] is not None:
+        all_heads = load_all_heads(experiment_settings["resume_training"]["heads"], all_heads)
 
     vae = VAE(encoder, decoder, device, experiment_settings["segmentation_config"], latent_dim=experiment_settings["latent_dimension"], N_images = N_images, amortized=amortized)
     vae.to(device)
     if experiment_settings["resume_training"]["model"]:
         vae.load_state_dict(torch.load(experiment_settings["resume_training"]["model"]))
         vae.to(device)
+
+    backbone_network.to(device)
+    for head in all_heads:
+        head.to(device)
 
 
     grid = EMAN2Grid(Npix_downsize, apix_downsize, device=device)
@@ -261,12 +277,18 @@ def parse_yaml(path, gpu_id, analyze=False):
         if "learning_rate_segmentation" not in experiment_settings["optimizer"]:
             list_param = [{"params": vae.parameters(), "lr":experiment_settings["optimizer"]["learning_rate"]}]
             list_param.append({"params": segmenter.parameters(), "lr":experiment_settings["optimizer"]["learning_rate"]})
+            list_param.append({"params": backbone_network.parameters(), "lr": experiment_settings["optimizer"]["lr_backbone"]})
+            for head in all_heads:
+                list_param.append({"params": head.parameters(), "lr": experiment_settings["optimizer"]["lr_heads"]})
             optimizer = torch.optim.Adam(list_param)
         else:
             list_param = [{"params": param, "lr":experiment_settings["optimizer"]["learning_rate_segmentation"]} for name, param in
                           segmenter.named_parameters() if "segments" in name]
             list_param.append({"params": vae.encoder.parameters(), "lr":experiment_settings["optimizer"]["learning_rate"]})
             list_param.append({"params": vae.decoder.parameters(), "lr":experiment_settings["optimizer"]["learning_rate"]})
+            list_param.append({"params": backbone_network.parameters(), "lr": experiment_settings["optimizer"]["lr_backbone"]})
+            for head in all_heads:
+                list_param.append({"params": head.parameters(), "lr": experiment_settings["optimizer"]["lr_heads"]})
             if not amortized:
                 list_param.append({"params": vae.latent_variables_mean, "lr":experiment_settings["optimizer"]["learning_rate"]})
 
@@ -338,7 +360,7 @@ def parse_yaml(path, gpu_id, analyze=False):
 
 
 
-    return vae, image_translator, ctf_experiment, grid, gmm_repr, optimizer, dataset, N_epochs, batch_size, experiment_settings, device, \
+    return vae, backbone_network, all_heads, image_translator, ctf_experiment, grid, gmm_repr, optimizer, dataset, N_epochs, batch_size, experiment_settings, device, \
     scheduler, base_structure, lp_mask2d, mask, amortized, path_results, structural_loss_parameters, segmenter
 
 
@@ -395,7 +417,8 @@ class SpatialGridTranslate(torch.nn.Module):
         return sampled[:, 0, :, :]
 
 
-def monitor_training(segmentation, segmenter, tracking_metrics, experiment_settings, vae, optimizer, pred_im, true_im, gpu_id):
+def monitor_training(segmentation, segmenter, tracking_metrics, experiment_settings, vae, backbone_network, all_heads,
+                     optimizer, pred_im, true_im, gpu_id):
     """
     Monitors the training process through wandb and saving models. The metrics are logged into a file and optionnally sent to Weight and Biases.
     :param segmentation: torch.tensor(N_batch, N_residues, N_segments) weights of the segmentation
@@ -403,13 +426,15 @@ def monitor_training(segmentation, segmenter, tracking_metrics, experiment_setti
     :param tracking_metrics: dictionnary containing metrics to plot.
     :param experiment_settings: dictionnary containing parameters of the current experiment
     :param vae: object of class VAE.
-    :param optimizer: optimizer object used in this run
+    :param backbone_network: object of class MLPPose.
+    :param all_heads: object of class MLPPose.
+    :param optimizer: optimizer object used in this run.
     :param pred_im: torch.tensor(N_batch, N_pix, N_pix), sample of predicted images, without CTF corruption
     :param true_im: torch.tensor(N_batch, N_pix, N_pix), corresponding sample of true images. 
     """
     if gpu_id == 0:
         if tracking_metrics["wandb"] == True:
-            ignore = ["wandb", "epoch", "path_results", "betas"]
+            ignore = ["wandb", "epoch", "path_results", "betas", "argmins", "rmsd_non_mean"]
             wandb.log({key: np.mean(val) for key, val in tracking_metrics.items() if key not in ignore})
             wandb.log({"epoch": tracking_metrics["epoch"]})
             wandb.log({"lr_segmentation":optimizer.param_groups[0]['lr']})
@@ -433,6 +458,22 @@ def monitor_training(segmentation, segmenter, tracking_metrics, experiment_setti
         segmenter_path = os.path.join(experiment_settings["folder_path"], "cryoSPHERE", "seg" + str(tracking_metrics["epoch"]) + ".pt" )
         torch.save(vae.state_dict(), model_path)
         torch.save(segmenter.state_dict(), segmenter_path)
+
+        backbone_path = os.path.join(experiment_settings["folder_path"], "cryoSPHERE", "backbone" + str(tracking_metrics["epoch"]) + ".pt" )
+        heads_path = os.path.join(experiment_settings["folder_path"], "cryoSPHERE", "heads" + str(tracking_metrics["epoch"]) + ".pt" )
+        torch.save(backbone_network.state_dict(), backbone_path)
+        torch.save(all_heads.state_dict(), heads_path)
+
+        all_argmins = np.concatenate(tracking_metrics["argmins"], axis=0)
+        argmins_path = os.path.join(experiment_settings["folder_path"], "cryoSPHERE",
+                                     "argmins" + str(tracking_metrics["epoch"]) + ".npy")
+        all_indexes = np.concatenate(tracking_metrics["indexes"], axis=0)
+        indexes_path = os.path.join(experiment_settings["folder_path"], "cryoSPHERE",
+                                     "indexes" + str(tracking_metrics["epoch"]) + ".npy")
+
+        np.save(argmins_path, all_argmins)
+        np.save(indexes_path, all_indexes)
+
         information_strings = [f"""Epoch: {tracking_metrics["epoch"]} || Correlation loss: {tracking_metrics["correlation_loss"][0]} || KL prior latent: {tracking_metrics["kl_prior_latent"][0]} 
             || KL prior segmentation std: {tracking_metrics["kl_prior_segmentation_std"][0]} || KL prior segmentation proportions: {tracking_metrics["kl_prior_segmentation_proportions"][0]} ||
             l2 penalty: {tracking_metrics["l2_pen"][0]} || Continuity loss: {tracking_metrics["continuity_loss"][0]} || Clashing loss: {tracking_metrics["clashing_loss"][0]}"""]
@@ -545,4 +586,12 @@ def deform_structure(atom_positions, translation_per_residue, quaternions, segme
     return new_atom_positions
 
 
-
+def load_all_heads(path, all_heads):
+    """
+    Load all head registered in an nn.Module
+    :param path: str, path to the module we want to load
+    """
+    parameters = torch.load(path)
+    all_heads.load_state_dict
+    for i, head in enumerate(all_heads):
+        head.load_state_dict({k.strip(f"{i}."):v for k, v in parameters.items() if k.startswith(f"{i}.")})

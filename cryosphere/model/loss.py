@@ -243,9 +243,9 @@ def remove_duplicate_pairs(pairs_a, pairs_b, remove_flip=True):
 def calc_cor_loss(pred_images, gt_images, mask=None):
     """
     Compute the cross-correlation for each pair (predicted_image, true) image in a batch. And average them
-    pred_images: torch.tensor(batch_size, side_shape**2) predicted images
+    pred_images: torch.tensor(batch_size, N_heads, side_shape, side_shape) predicted images
     gt_images: torch.tensor(batch_size, side_shape**2) of true images, translated according to the poses.
-    return torch.tensor(1) of average correlation accross the batch.
+    return torch.tensor(1) of average correlation across the batch.
     """
     if mask is not None:
         pred_images = mask(pred_images)
@@ -261,12 +261,13 @@ def calc_cor_loss(pred_images, gt_images, mask=None):
     #gt_images = gt_images.flatten(start_dim=2)
 
     # b 
-    dots = (pred_images * gt_images).sum(-1)
-    # b -> b 
-    err = -dots / (gt_images.std(-1) + 1e-5) / (pred_images.std(-1) + 1e-5)
-    # b -> 1 value
+    dots = (pred_images * gt_images[:, None, :]).sum(-1)
+    # b -> b
+    err = -dots / (gt_images[:, None, :].std(-1) + 1e-5) / (pred_images[:, :, :].std(-1) + 1e-5)
+    err, argmins = torch.min(err, dim = - 1)
+    err_non_mean = err/pixel_num
     err = err.mean() / pixel_num
-    return err
+    return err, argmins, err_non_mean
 
 def compute_KL_prior_latent(latent_mean, latent_std, epsilon_loss):
     """
@@ -345,7 +346,7 @@ def compute_loss(predicted_images, images, segmentation_image, latent_mean, late
                  epoch, predicted_structures = None, device=None):
     """
     Compute the entire loss
-    :param predicted_images: torch.tensor(batch_size, N_pix), predicted images
+    :param predicted_images: torch.tensor(batch_size, N_heads, N_pix), predicted images
     :param images: torch.tensor(batch_size, N_pix), true images
     :param latent_mean:torch.tensor(batch_size, latent_dim), mean of the approximate latent distribution
     :param latent_std:torch.tensor(batch_size, latent_dim), std of the approximate latent distribution
@@ -359,7 +360,7 @@ def compute_loss(predicted_images, images, segmentation_image, latent_mean, late
     :param device: torch device on which we perform the computations.
     :return: torch.float32, average loss over the batch dimension
     """
-    rmsd = calc_cor_loss(predicted_images, images, segmentation_image)
+    rmsd, argmins, rmsd_non_mean = calc_cor_loss(predicted_images, images, segmentation_image)
     KL_prior_latent = compute_KL_prior_latent(latent_mean, latent_std, experiment_settings["epsilon_kl"])
     KL_prior_segmentation_means = compute_KL_prior_segments(
         segmenter, experiment_settings["segmentation_prior"],
@@ -393,6 +394,8 @@ def compute_loss(predicted_images, images, segmentation_image, latent_mean, late
     tracking_dict["clashing_loss"].append(clashing_loss.detach().cpu().numpy())
     tracking_dict["clashing_loss"].append(clashing_loss.detach().cpu().numpy())
     tracking_dict["betas"] = loss_weights
+    tracking_dict["rmsd_non_mean"].append(rmsd_non_mean.detach().cpu().numpy())
+    tracking_dict["argmins"].append(argmins.detach().cpu().numpy())
 
     loss = rmsd + loss_weights["KL_prior_latent"]*KL_prior_latent/pixel_num \
            + loss_weights["KL_prior_segmentation_mean"]*KL_prior_segmentation_means/pixel_num \

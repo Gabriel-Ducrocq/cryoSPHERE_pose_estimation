@@ -140,7 +140,16 @@ class ImageDataSet(Dataset):
 
         self.f_std = None
         self.f_mu = None
-        self.estimate_normalization()
+        #self.estimate_normalization()
+
+    def standardize_corner(self, images, epsilon=1e-5):
+        """
+        For each image separately, computes the mean and variances based on the corner pixels
+        and normalize the image
+        """
+        means = torch.mean(images[self.mask.mask_out])
+        stds = torch.std(images[self.mask.mask_out])
+        return (images - means)/(stds + epsilon)
 
     def estimate_normalization(self):
         if self.f_mu is None and self.f_std is None:
@@ -206,6 +215,7 @@ class ImageDataSet(Dataset):
                 raise NotImplementedError            
 
         proj = proj[0]
+        proj = self.standardize_corner(images=proj)
         if self.mask is not None:
             proj = self.mask(proj)
 
