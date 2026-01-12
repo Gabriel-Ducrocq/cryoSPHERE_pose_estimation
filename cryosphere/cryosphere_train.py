@@ -67,9 +67,9 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
             else:
                 latent_variables, latent_mean, latent_std = vae.module.sample_latent(None, indexes)
 
-            encoded_images_pose = backbone_network(flattened_batch_images)
+            encoded_images_pose = backbone_network.module(flattened_batch_images)
             all_poses_predicted = []
-            for head in all_heads:
+            for head in all_heads.module:
                 predicted_pose = head(encoded_images_pose)
                 all_poses_predicted.append(predicted_pose[:, None, :])
 
