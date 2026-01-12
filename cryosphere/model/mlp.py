@@ -80,8 +80,7 @@ class MLPPose(nn.Module):
         hidden = self.linear_relu_stack(x)
         if self.type == "head":
             output_translation = self.output_translation_layer(hidden)
-            output_rotation = self.output_rotation_layer(hidden)
-            output = torch.concat([output_rotation, output_translation], dim=-1)
+            output = self.output_rotation_layer(hidden)
         else:
             output = self.output_layer(hidden)
 
