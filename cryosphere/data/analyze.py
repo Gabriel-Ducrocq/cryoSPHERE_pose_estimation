@@ -162,6 +162,10 @@ def sample_latent_variables(gpu_id, world_size, vae, backbone_network, all_heads
     """
     vae.to(gpu_id)
     vae = DDP(vae, device_ids=[gpu_id])
+    backbone_network.to(gpu_id)
+    backbone_network = DDP(backbone_network, device_ids=[gpu_id])
+    all_heads.to(gpu_id)
+    all_heads = DDP(all_heads, device_ids = [gpu_id])
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, drop_last=False, sampler=DistributedSampler(dataset, shuffle=False, drop_last=False))
     data_loader.sampler.set_epoch(0)
     data_loader = tqdm(iter(data_loader))
