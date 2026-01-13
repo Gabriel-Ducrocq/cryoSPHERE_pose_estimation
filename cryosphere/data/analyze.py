@@ -215,6 +215,7 @@ def sample_latent_variables(gpu_id, world_size, vae, backbone_network, all_heads
             all_latent_variables.append(sorted_batch_latent_mean.detach().cpu().numpy())
             all_rotation_matrices.append(sorted_batch_rotation_matrices.detach().cpu().numpy())
             all_indexes.append(all_gpu_indexes[sorted_batch_indexes].detach().cpu().numpy())
+            print("SIZE", sorted_batch_rotation_matrices.shape)
 
 
     if gpu_id == 0:
