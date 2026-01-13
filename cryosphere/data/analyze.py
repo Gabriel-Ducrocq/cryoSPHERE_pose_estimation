@@ -200,6 +200,7 @@ def sample_latent_variables(gpu_id, world_size, vae, backbone_network, all_heads
                                        for _ in range(world_size)]
             gather(latent_mean, batch_latent_mean_list)
             gather(indexes, batch_indexes)
+            gather(rotation_matrices, batch_rotation_matrices)
         else:
             gather(latent_mean)
             gather(indexes)
