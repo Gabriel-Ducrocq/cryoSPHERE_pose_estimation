@@ -191,7 +191,7 @@ def sample_latent_variables(gpu_id, world_size, vae, backbone_network, all_heads
 
         all_poses_predicted = torch.concat(all_poses_predicted, dim=1)
         predicted_r6 = all_poses_predicted[:, :, :]
-        predicted_r6 = predicted_r6.reshape(batch_size, -1, 3, 2)
+        predicted_r6 = predicted_r6.reshape(predicted_r6.shape[0], -1, 3, 2)
         rotation_matrices = roma.special_gramschmidt(predicted_r6)
         if gpu_id == 0:
             batch_latent_mean_list = [torch.zeros_like(latent_mean, device=latent_mean.device).contiguous() for _ in range(world_size)]
