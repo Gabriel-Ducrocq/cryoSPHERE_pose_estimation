@@ -1,30 +1,31 @@
-import sys
 import os
-from os.path import dirname, join, abspath
-sys.path.insert(0, abspath(join(dirname(__file__), '..')))
+import sys
+import roma
 import torch
-from cryosphere.model import utils
 import argparse
 import starfile
 import numpy as np
-import seaborn as sns
-from time import time
 from tqdm import tqdm
-from torch.utils.data import Dataset
-import torch.multiprocessing as mp
-from torch.utils.data.distributed import DistributedSampler
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.distributed import destroy_process_group
-from cryosphere.model.polymer import Polymer
+import seaborn as sns
 import matplotlib.pyplot as plt
+import torch.multiprocessing as mp
+from torch.utils.data import Dataset
 from sklearn.decomposition import PCA
 from torch.utils.data import DataLoader
 from scipy.spatial.distance import cdist
+from os.path import dirname, join, abspath
+from torch.distributed import destroy_process_group
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
+sys.path.insert(0, abspath(join(dirname(__file__), '..')))
+from cryosphere.model import utils
 
 
 parser_arg = argparse.ArgumentParser()
 parser_arg.add_argument('--experiment_yaml', type=str, required=True, help="path to the yaml defining the experimentation")
 parser_arg.add_argument("--model", type=str, required=True, help="path to the model we want to analyze")
+parser_arg.add_argument('--backbone_path', type=str, required=True, help="path to the pose backbone network we want to use")
+parser_arg.add_argument('--heads_path', type=str, required=True, help="path to the pose heads we want to use")
 parser_arg.add_argument("--segmenter", type=str, required=True, help="path to the segmenter we want to analyze")
 parser_arg.add_argument("--output_path", type=str, required=True, help="path of the directory to save the results")
 parser_arg.add_argument("--z", type=str, required=False, help="path of the latent variables in npy format, if we already have them")
@@ -133,23 +134,30 @@ def graph_traversal(z_pca, dim, num_points=10):
     traj_pca[:, dim] = np.linspace(start, stop, num_points)
     return traj_pca
 
-def start_sample_latent(rank, world_size,  yaml_setting_path, output_path, model_path, segmenter_path, num_workers=4):
+
+def start_sample_latent(rank, world_size,  yaml_setting_path, output_path, model_path, backbone_path, heads_path,
+                        segmenter_path, num_workers=4):
     utils.ddp_setup(rank, world_size)
-    (vae, image_translator, ctf_experiment, grid, gmm_repr, optimizer, dataset, N_epochs, batch_size, experiment_settings, device,
+    (vae, backbone_network, all_heads, image_translator, ctf_experiment, grid, gmm_repr, optimizer, dataset, N_epochs, batch_size, experiment_settings, device,
     scheduler, base_structure, lp_mask2d, mask, amortized, path_results, structural_loss_parameters, segmenter)  = utils.parse_yaml(yaml_setting_path, rank, analyze=True)
     vae.load_state_dict(torch.load(model_path))
     vae.eval()
-    z = sample_latent_variables(rank, world_size, vae, dataset, batch_size, output_path)
+    backbone_network.load_state_dict(torch.load(backbone_path))
+    all_heads = utils.load_all_heads(heads_path, all_heads)
+    all_heads.eval()
+    z = sample_latent_variables(rank, world_size, vae, backbone_network, all_heads, dataset, batch_size, output_path)
     destroy_process_group()
 
-def sample_latent_variables(gpu_id, world_size, vae, dataset, batch_size, output_path, num_workers=4):
+def sample_latent_variables(gpu_id, world_size, vae, backbone_network, all_heads, dataset, batch_size, output_path, num_workers=4):
     """
     Sample all the latent variables of the dataset and save them in a .npy file
     :param vae: object of class VAE corresponding to the model we want to analyze.
-    :param dataset: object of class dataset: data on which to analyze the model
-    :param batch_size: integer, batch size
-    :param output_path: str, path where we want to register the latent variables
-    :param num_workers: integer, number of workers
+    :param backbone_network: object of class MLPPose, backbone of the pose inference network.
+    :param all_heads: torch ModuleList of object MLPPose, heads of the pose inference network.
+    :param dataset: object of class dataset: data on which to analyze the model.
+    :param batch_size: integer, batch size.
+    :param output_path: str, path where we want to register the latent variables.
+    :param num_workers: integer, number of workers.
     return 
     """
     vae.to(gpu_id)
@@ -159,6 +167,7 @@ def sample_latent_variables(gpu_id, world_size, vae, dataset, batch_size, output
     data_loader = tqdm(iter(data_loader))
     all_latent_variables = []
     all_indexes = []
+    all_rotation_matrices = []
     for batch_num, (indexes, batch_images, batch_poses, batch_poses_translation, _) in enumerate(data_loader):
         batch_images = batch_images.to(gpu_id)
         batch_poses = batch_poses.to(gpu_id)
@@ -169,21 +178,38 @@ def sample_latent_variables(gpu_id, world_size, vae, dataset, batch_size, output
         latent_variables, latent_mean, latent_std = vae.module.sample_latent(batch_images, indexes)
         latent_mean = latent_mean.contiguous()
         indexes = indexes.contiguous()
+
+        encoded_images_pose = backbone_network.module(batch_images)
+        all_poses_predicted = []
+        for head in all_heads.module:
+            predicted_pose = head(encoded_images_pose)
+            all_poses_predicted.append(predicted_pose[:, None, :])
+
+        all_poses_predicted = torch.concat(all_poses_predicted, dim=1)
+        predicted_r6 = all_poses_predicted[:, :, :]
+        predicted_r6 = predicted_r6.reshape(batch_size, -1, 3, 2)
+        rotation_matrices = roma.special_gramschmidt(predicted_r6)
         if gpu_id == 0:
             batch_latent_mean_list = [torch.zeros_like(latent_mean, device=latent_mean.device).contiguous() for _ in range(world_size)]
             batch_indexes = [torch.zeros_like(indexes, device=batch_images.device).contiguous() for _ in range(world_size)]
+            batch_rotation_matrices = [torch.zeros_like(rotation_matrices, device=batch_rotation_matrices.device).contiguous()
+                                       for _ in range(world_size)]
             gather(latent_mean, batch_latent_mean_list)
             gather(indexes, batch_indexes)
         else:
             gather(latent_mean)
             gather(indexes)
+            gather(rotation_matrices)
 
         if gpu_id == 0:
             all_gpu_indexes = torch.concat(batch_indexes, dim=0)
             all_gpu_latent_mean = torch.concat(batch_latent_mean_list, dim=0)
+            all_gpu_rotation_matrices = torch.concat(batch_rotation_matrices, dim=0)
             sorted_batch_indexes = torch.argsort(all_gpu_indexes, dim=0)
             sorted_batch_latent_mean = all_gpu_latent_mean[sorted_batch_indexes]
+            sorted_batch_rotation_matrices = all_gpu_rotation_matrices[sorted_batch_indexes]
             all_latent_variables.append(sorted_batch_latent_mean.detach().cpu().numpy())
+            all_rotation_matrices.append(sorted_batch_rotation_matrices.detach().cpu().numpy())
             all_indexes.append(all_gpu_indexes[sorted_batch_indexes].detach().cpu().numpy())
 
 
@@ -192,6 +218,10 @@ def sample_latent_variables(gpu_id, world_size, vae, dataset, batch_size, output
         all_indexes = np.concatenate(all_indexes, axis = 0)
         latent_path = os.path.join(output_path, "z.npy")
         np.save(latent_path, all_latent_variables)
+
+        all_rotation_matrices = np.concatenate(all_rotation_matrices, axis=0)
+        rotation_path = os.path.join(output_path, "rotation_poses.npy")
+        np.save(rotation_path, all_rotation_matrices)
 
 
 def plot_pca(output_path, dim, all_trajectories_pca, z_pca, pca):
@@ -324,32 +354,42 @@ def generate_structures(rank, vae, segmenter, base_structure, path_structures, l
         save_structures(predicted_structures, base_structure, batch_num, path_structures, batch_size, indexes)
 
 
-def analyze(yaml_setting_path, model_path, segmenter_path, output_path, z, thinning=1, dimensions=[0, 1, 2], num_points=10, generate_structures=False):
+def analyze(yaml_setting_path, model_path, segmenter_path, backbone_path, heads_path, output_path, z, thinning=1,
+            dimensions=[0, 1, 2], num_points=10, generate_structures=False):
     """
     train a VAE network
     :param yaml_setting_path: str, path the yaml containing all the details of the experiment.
     :param model_path: str, path to the model we want to analyze.
     :param segmenter_path: str, path to the segmenter used for the analysis.
+    :param backbone_path: str, path to the backbone used for pose estimation.
+    :param heads_path: str, path to the heads used for pose estimation.
     :param structures_path: 
     :return:
     """
-    (vae, image_translator, ctf_experiment, grid, gmm_repr, optimizer, dataset, N_epochs, batch_size, experiment_settings, device,
-    scheduler, base_structure, lp_mask2d, mask, amortized, path_results, structural_loss_parameters, segmenter)  = utils.parse_yaml(yaml_setting_path, gpu_id = 0, analyze=True)
+    (vae, backbone_network, all_heads, image_translator, ctf_experiment, grid, gmm_repr, optimizer, dataset, N_epochs, batch_size,
+     experiment_settings, device, scheduler, base_structure, lp_mask2d, mask, amortized, path_results,
+     structural_loss_parameters, segmenter)  = utils.parse_yaml(yaml_setting_path, gpu_id = 0, analyze=True)
     vae.load_state_dict(torch.load(model_path))
     vae.eval()
     segmenter.load_state_dict(torch.load(segmenter_path))
     segmenter.eval()
+    backbone_network.load_state_dict(torch.load(backbone_path))
+    backbone_network.eval()
+    all_heads = utils.load_all_heads(heads_path, all_heads)
+    all_heads.eval()
     if not os.path.exists(output_path):
             os.makedirs(output_path)
 
     world_size = torch.cuda.device_count()
     if z is None:
-        mp.spawn(start_sample_latent, args=(world_size, yaml_setting_path, output_path, model_path, segmenter_path), nprocs=world_size)
+        mp.spawn(start_sample_latent, args=(world_size, yaml_setting_path, output_path, model_path, segmenter_path),
+                nprocs=world_size)
         latent_path = os.path.join(output_path, "z.npy")
         z = np.load(latent_path)
 
     if not generate_structures:
-        run_pca_analysis(vae, z, dimensions, num_points, output_path, gmm_repr, base_structure, thinning, segmenter, device=device)
+        run_pca_analysis(vae, z, dimensions, num_points, output_path, gmm_repr, base_structure, thinning, segmenter,
+                         device=device)
 
     else:
         path_structures = os.path.join(output_path, "predicted_structures")
@@ -370,12 +410,15 @@ def analyze_run():
     path = args.experiment_yaml
     dimensions = args.dimensions
     segmenter_path = args.segmenter
+    backbone_path = args.backbone_path
+    heads_path = args.heads_path
     z = None
     if args.z is not None:
         z = np.load(args.z)
         
     generate_structures = args.generate_structures
-    analyze(path, model_path, segmenter_path, output_path, z, dimensions=dimensions, generate_structures=generate_structures, thinning=thinning, num_points=num_points)
+    analyze(path, model_path, segmenter_path, backbone_path, heads_path, output_path, z, dimensions=dimensions,
+            generate_structures=generate_structures, thinning=thinning, num_points=num_points)
 
 
 if __name__ == '__main__':
