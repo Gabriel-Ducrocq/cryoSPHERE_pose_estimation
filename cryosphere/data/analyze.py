@@ -196,7 +196,7 @@ def sample_latent_variables(gpu_id, world_size, vae, backbone_network, all_heads
         if gpu_id == 0:
             batch_latent_mean_list = [torch.zeros_like(latent_mean, device=latent_mean.device).contiguous() for _ in range(world_size)]
             batch_indexes = [torch.zeros_like(indexes, device=batch_images.device).contiguous() for _ in range(world_size)]
-            batch_rotation_matrices = [torch.zeros_like(rotation_matrices, device=batch_rotation_matrices.device).contiguous()
+            batch_rotation_matrices = [torch.zeros_like(rotation_matrices, device=rotation_matrices.device).contiguous()
                                        for _ in range(world_size)]
             gather(latent_mean, batch_latent_mean_list)
             gather(indexes, batch_indexes)
