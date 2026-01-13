@@ -375,7 +375,7 @@ def analyze(yaml_setting_path, model_path, segmenter_path, backbone_path, heads_
     segmenter.eval()
     backbone_network.load_state_dict(torch.load(backbone_path))
     backbone_network.eval()
-    all_heads = utils.load_all_heads(heads_path, all_heads)
+    utils.load_all_heads(heads_path, all_heads)
     all_heads.eval()
     if not os.path.exists(output_path):
             os.makedirs(output_path)

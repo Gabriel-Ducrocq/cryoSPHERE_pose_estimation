@@ -591,6 +591,5 @@ def load_all_heads(path, all_heads):
     :param path: str, path to the module we want to load
     """
     parameters = torch.load(path)
-    all_heads.load_state_dict
     for i, head in enumerate(all_heads):
         head.load_state_dict({k.strip(f"{i}."):v for k, v in parameters.items() if k.startswith(f"{i}.")})
