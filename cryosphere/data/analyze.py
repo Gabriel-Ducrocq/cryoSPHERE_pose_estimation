@@ -143,7 +143,7 @@ def start_sample_latent(rank, world_size,  yaml_setting_path, output_path, model
     vae.load_state_dict(torch.load(model_path))
     vae.eval()
     backbone_network.load_state_dict(torch.load(backbone_path))
-    all_heads = utils.load_all_heads(heads_path, all_heads)
+    utils.load_all_heads(heads_path, all_heads)
     all_heads.eval()
     z = sample_latent_variables(rank, world_size, vae, backbone_network, all_heads, dataset, batch_size, output_path)
     destroy_process_group()
