@@ -444,6 +444,7 @@ def monitor_training(segmentation, segmenter, tracking_metrics, experiment_setti
                 for l in range(segm["segmentation"].shape[-1]):
                     wandb.log({f"segments/{part}/segment_{l}": np.sum(hard_segments[0] == l)})
 
+            print("ARGMIN", argmins[0])
             pred_im = pred_im[0][argmins[0]].detach().cpu().numpy()[:, :, None]
             true_im = true_im[0].detach().cpu().numpy()[:, :, None]
             predicted_image_wandb = wandb.Image(pred_im, caption="Predicted image")
