@@ -79,7 +79,8 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
                                                                     quaternions_per_domain, segmentation, gpu_id)
             else:
                 predicted_structures = gmm_repr.mus[None, :, :].repeat(batch_images.shape[0], 1, 1)
-                latent_mean = torch.zeros(batch_poses.shape[0], experiment_settings["latent_dimension"], device=gpu_id)
+                latent_mean = None
+                latent_mean = None
 
             encoded_images_pose = backbone_network.module(flattened_batch_images)
             all_poses_predicted = []
