@@ -11,6 +11,7 @@ import logging
 import mrcfile
 import warnings
 import starfile
+import torchvision
 import numpy as np
 file_dir = os.path.dirname(__file__)
 sys.path.append(file_dir)
@@ -28,6 +29,7 @@ from torch.distributed import init_process_group
 from cryosphere.model.dataset import ImageDataSet
 from cryosphere.model.gmm import Gaussian, EMAN2Grid
 from cryosphere.model.segmentation import Segmentation
+from torchvision.transforms.functional import InterpolationMode
 #from pytorch3d.transforms import quaternion_to_axis_angle, axis_angle_to_matrix, axis_angle_to_quaternion, quaternion_apply
 from cryosphere.model.loss import compute_loss, find_range_cutoff_pairs, remove_duplicate_pairs, find_continuous_pairs, calc_dist_by_pair_indices
 import roma
@@ -593,3 +595,18 @@ def load_all_heads(path, all_heads):
     parameters = torch.load(path)
     for i, head in enumerate(all_heads):
         head.load_state_dict({k.strip(f"{i}."):v for k, v in parameters.items() if k.startswith(f"{i}.")})
+
+
+def rotate_images(images, angle, method=None):
+    """
+    Rotates the images according to specified angle.
+    :param images: torch.tensor(batch_size, Npix, Npix) images to rotates.
+    :param angles: integer, angle in degrees for the rotation.
+    :param method: None or str, name of the interpolation method to use
+    :return: torch.tensor(batch_size, Npix, Npix) rotated images
+    """
+    rotated_images = torchvision.transforms.functional.rotate(img=images, angle=angle,
+                                                              interpolation=InterpolationMode.BILINEAR)
+    return rotated_images
+
+

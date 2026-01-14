@@ -342,7 +342,7 @@ def compute_clashing_distances(new_structures, device, cutoff=4):
     return torch.mean(average_clahing)
 
 
-def compute_loss(predicted_images, images, segmentation_image, latent_mean, latent_std, vae, segmenter, experiment_settings, tracking_dict, structural_loss_parameters,
+def compute_loss(predicted_images, images, segmentation_image, latent_mean, latent_std, augmented_latent_mean, vae, segmenter, experiment_settings, tracking_dict, structural_loss_parameters,
                  epoch, predicted_structures = None, device=None):
     """
     Compute the entire loss
@@ -350,6 +350,7 @@ def compute_loss(predicted_images, images, segmentation_image, latent_mean, late
     :param images: torch.tensor(batch_size, N_pix), true images
     :param latent_mean:torch.tensor(batch_size, latent_dim), mean of the approximate latent distribution
     :param latent_std:torch.tensor(batch_size, latent_dim), std of the approximate latent distribution
+    :param augmented_latent_mean: torch.tensor(batch_size, latent_dim), means of the approximate latent distribution for the augmented images.
     :param segmenter: object of the class VAE.
     :param segmenter: object of the class Segmentation.
     :param experiment_settings: dictionnary with the settings of the current experiment
@@ -362,6 +363,7 @@ def compute_loss(predicted_images, images, segmentation_image, latent_mean, late
     """
     rmsd, argmins, rmsd_non_mean = calc_cor_loss(predicted_images, images, segmentation_image)
     if epoch >= experiment_settings["pose_warmup"]:
+        augmentation_loss = torch.mean(torch.sum((augmented_latent_mean - latent_mean) ** 2, dim=-1))
         KL_prior_latent = compute_KL_prior_latent(latent_mean, latent_std, experiment_settings["epsilon_kl"])
         KL_prior_segmentation_means = compute_KL_prior_segments(
             segmenter, experiment_settings["segmentation_prior"],
@@ -397,6 +399,7 @@ def compute_loss(predicted_images, images, segmentation_image, latent_mean, late
         tracking_dict["betas"] = loss_weights
         tracking_dict["rmsd_non_mean"].append(rmsd_non_mean.detach().cpu().numpy())
         tracking_dict["argmins"].append(argmins.detach().cpu().numpy())
+        tracking_dict["augmentation_loss"].append(augmentation_loss.detach().cpu().numpy())
 
         loss = rmsd + loss_weights["KL_prior_latent"]*KL_prior_latent/pixel_num \
                + loss_weights["KL_prior_segmentation_mean"]*KL_prior_segmentation_means/pixel_num \
@@ -404,7 +407,8 @@ def compute_loss(predicted_images, images, segmentation_image, latent_mean, late
                + loss_weights["KL_prior_segmentation_proportions"] * KL_prior_segmentation_proportions/pixel_num \
                + loss_weights["l2_pen"] * l2_pen \
                + loss_weights["continuity_loss"]*continuity_loss \
-               + loss_weights["clashing_loss"]*clashing_loss
+               + loss_weights["clashing_loss"]*clashing_loss \
+               + loss_weights["augmentation_loss"]*augmentation_loss
 
     else:
         loss = rmsd

@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 parser_arg = argparse.ArgumentParser()
 parser_arg.add_argument('--experiment_yaml', type=str, required=True, help="path to the yaml containing all the parameters for the cryoSPHERE run.")
 
+
+probs = torch.tensor([1/3, 1/3, 1/3])
+angles = [90, 180, 270]
+
 def train(rank, world_size, yaml_setting_path):
     """
     train a VAE network
@@ -47,7 +51,7 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
     for epoch in range(N_epochs):
         tracking_metrics = {"wandb":experiment_settings["wandb"], "epoch": epoch, "path_results":path_results ,"correlation_loss":[], "kl_prior_latent":[], 
                             "kl_prior_segmentation_mean":[], "kl_prior_segmentation_std":[], "kl_prior_segmentation_proportions":[], "l2_pen":[], "continuity_loss":[], 
-                            "clashing_loss":[], "rmsd_non_mean":[], "argmins":[], "indexes":[]}
+                            "clashing_loss":[], "rmsd_non_mean":[], "argmins":[], "indexes":[], "augmentation_loss":[]}
 
         data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers = experiment_settings["num_workers"], drop_last=True, sampler=DistributedSampler(dataset, drop_last=True))
         start_tot = time()
@@ -59,14 +63,20 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
             batch_poses = batch_poses.to(gpu_id)
             batch_poses_translation = batch_poses_translation.to(gpu_id)
             indexes = indexes.to(gpu_id)
-            flattened_batch_images = batch_images.flatten(start_dim=-2)
             batch_translated_images = image_translator.transform(batch_images, batch_poses_translation[:, None, :])
+            flattened_batch_images = batch_translated_images.flatten(start_dim=-2)
             lp_batch_translated_images = low_pass_images(batch_translated_images, lp_mask2d)
+
+            inplane_angle = np.random.choice([90, 180, 270])
+            augmented_images = model.utils.rotate_images(batch_images, inplane_angle)
+            flattened_augmented_images = augmented_images.flatten(start_dim=-2)
 
             segmentation = segmenter.module.sample_segments(batch_images.shape[0])
             if epoch >= experiment_settings["pose_warmup"]:
                 if amortized:
                     latent_variables, latent_mean, latent_std = vae.module.sample_latent(flattened_batch_images)
+                    (augmented_latent_variables, augmented_latent_mean,
+                     augmented_latent_std) = vae.module.sample_latent(flattened_augmented_images)
                 else:
                     latent_variables, latent_mean, latent_std = vae.module.sample_latent(None, indexes)
 
@@ -93,7 +103,7 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
             posed_predicted_structures = renderer.rotate_structure(predicted_structures, rotation_matrices)
             predicted_images  = renderer.project(posed_predicted_structures, gmm_repr.sigmas, gmm_repr.amplitudes, grid)
             batch_predicted_images = renderer.apply_ctf(predicted_images, ctf, indexes)#/dataset.f_std
-            loss, argmins = compute_loss(batch_predicted_images, lp_batch_translated_images, None, latent_mean, latent_std, vae.module, segmenter.module, experiment_settings, tracking_metrics,
+            loss, argmins = compute_loss(batch_predicted_images, lp_batch_translated_images, None, latent_mean, latent_std, augmented_latent_mean, vae.module, segmenter.module, experiment_settings, tracking_metrics,
                 structural_loss_parameters= structural_loss_parameters, epoch=epoch, predicted_structures=predicted_structures, device=gpu_id)
 
             loss.backward()
