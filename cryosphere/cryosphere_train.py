@@ -120,7 +120,7 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
 
         model.utils.monitor_training(segmentation, segmenter.module, tracking_metrics, experiment_settings, vae.module,
                                      backbone_network.module, all_heads.module, optimizer, predicted_images,
-                                     batch_images, gpu_id, argmins)
+                                     batch_images, gpu_id, argmins, epoch)
 
 
 def cryosphere_train():
