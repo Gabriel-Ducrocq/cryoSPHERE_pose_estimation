@@ -67,7 +67,7 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
             flattened_batch_images = batch_translated_images.flatten(start_dim=-2)
             lp_batch_translated_images = low_pass_images(batch_translated_images, lp_mask2d)
 
-            inplane_angle = np.random.choice([90, 180, 270])
+            inplane_angle = float(np.random.choice([90, 180, 270]))
             augmented_images = model.utils.rotate_images(batch_images, inplane_angle)
             flattened_augmented_images = augmented_images.flatten(start_dim=-2)
 
@@ -91,7 +91,7 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
                 predicted_structures = gmm_repr.mus[None, :, :].repeat(batch_images.shape[0], 1, 1)
                 latent_mean = None
                 latent_std = None
-                
+
                 augmented_latent_std = None
                 augmented_latent_mean = None
 
