@@ -420,7 +420,7 @@ class SpatialGridTranslate(torch.nn.Module):
 
 
 def monitor_training(segmentation, segmenter, tracking_metrics, experiment_settings, vae, backbone_network, all_heads,
-                     optimizer, pred_im, true_im, gpu_id, argmins):
+                     optimizer, pred_im, true_im, gpu_id, argmins, epoch):
     """
     Monitors the training process through wandb and saving models. The metrics are logged into a file and optionnally sent to Weight and Biases.
     :param segmentation: torch.tensor(N_batch, N_residues, N_segments) weights of the segmentation
@@ -432,7 +432,8 @@ def monitor_training(segmentation, segmenter, tracking_metrics, experiment_setti
     :param all_heads: object of class MLPPose.
     :param optimizer: optimizer object used in this run.
     :param pred_im: torch.tensor(N_batch, N_pix, N_pix), sample of predicted images, without CTF corruption
-    :param true_im: torch.tensor(N_batch, N_pix, N_pix), corresponding sample of true images. 
+    :param true_im: torch.tensor(N_batch, N_pix, N_pix), corresponding sample of true images.
+    :param epoch: integer, epoch number
     """
     if gpu_id == 0:
         if tracking_metrics["wandb"] == True:
@@ -475,10 +476,15 @@ def monitor_training(segmentation, segmenter, tracking_metrics, experiment_setti
         np.save(argmins_path, all_argmins)
         np.save(indexes_path, all_indexes)
 
-        information_strings = [f"""Epoch: {tracking_metrics["epoch"]} || Correlation loss: {tracking_metrics["correlation_loss"][0]} || KL prior latent: {tracking_metrics["kl_prior_latent"][0]} 
-            || KL prior segmentation std: {tracking_metrics["kl_prior_segmentation_std"][0]} || KL prior segmentation proportions: {tracking_metrics["kl_prior_segmentation_proportions"][0]} ||
-            l2 penalty: {tracking_metrics["l2_pen"][0]} || Continuity loss: {tracking_metrics["continuity_loss"][0]} || Clashing loss: {tracking_metrics["clashing_loss"][0]}"""]
-        information_strings += [f"{loss_term} beta: {beta}" for loss_term, beta in tracking_metrics["betas"].items()]
+        if epoch >= experiment_settings["pose_warmup"]:
+            information_strings = [f"""Epoch: {tracking_metrics["epoch"]} || Correlation loss: {tracking_metrics["correlation_loss"][0]} || KL prior latent: {tracking_metrics["kl_prior_latent"][0]} 
+                || KL prior segmentation std: {tracking_metrics["kl_prior_segmentation_std"][0]} || KL prior segmentation proportions: {tracking_metrics["kl_prior_segmentation_proportions"][0]} ||
+                l2 penalty: {tracking_metrics["l2_pen"][0]} || Continuity loss: {tracking_metrics["continuity_loss"][0]} || Clashing loss: {tracking_metrics["clashing_loss"][0]}"""]
+            information_strings += [f"{loss_term} beta: {beta}" for loss_term, beta in tracking_metrics["betas"].items()]
+        else:
+            information_strings = [f"""Epoch: {tracking_metrics["epoch"]} || Correlation loss: {tracking_metrics["correlation_loss"][0]}"""]
+            information_strings += [f"{loss_term} beta: {beta}" for loss_term, beta in tracking_metrics["betas"].items()]
+
         information_string = " || ".join(information_strings)
         logging.info(information_string)
 
