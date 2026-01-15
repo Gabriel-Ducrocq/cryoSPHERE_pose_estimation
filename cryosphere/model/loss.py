@@ -362,6 +362,7 @@ def compute_loss(predicted_images, images, segmentation_image, latent_mean, late
     :return: torch.float32, average loss over the batch dimension, torch.tensor argmin for each batch sample
     """
     rmsd, argmins, rmsd_non_mean = calc_cor_loss(predicted_images, images, segmentation_image)
+    loss_weights = compute_all_beta_schedule(epoch, experiment_settings["N_epochs"], experiment_settings["loss"])
     if epoch >= experiment_settings["pose_warmup"]:
         augmentation_loss = torch.mean(torch.sum((augmented_latent_mean - latent_mean) ** 2, dim=-1))
         KL_prior_latent = compute_KL_prior_latent(latent_mean, latent_std, experiment_settings["epsilon_kl"])
@@ -384,8 +385,6 @@ def compute_loss(predicted_images, images, segmentation_image, latent_mean, late
         l2_pen = compute_l2_pen(vae)
 
 
-        loss_weights = compute_all_beta_schedule(epoch, experiment_settings["N_epochs"], experiment_settings["loss"])
-
         pixel_num = predicted_images.shape[-1]*predicted_images.shape[-2]
         tracking_dict["correlation_loss"].append(rmsd.detach().cpu().numpy())
         tracking_dict["kl_prior_latent"].append(KL_prior_latent.detach().cpu().numpy())
@@ -396,7 +395,6 @@ def compute_loss(predicted_images, images, segmentation_image, latent_mean, late
         tracking_dict["continuity_loss"].append(continuity_loss.detach().cpu().numpy())
         tracking_dict["clashing_loss"].append(clashing_loss.detach().cpu().numpy())
         tracking_dict["clashing_loss"].append(clashing_loss.detach().cpu().numpy())
-        tracking_dict["betas"] = loss_weights
         tracking_dict["rmsd_non_mean"].append(rmsd_non_mean.detach().cpu().numpy())
         tracking_dict["argmins"].append(argmins.detach().cpu().numpy())
         tracking_dict["augmentation_loss"].append(augmentation_loss.detach().cpu().numpy())
@@ -416,5 +414,7 @@ def compute_loss(predicted_images, images, segmentation_image, latent_mean, late
         tracking_dict["argmins"].append(argmins.detach().cpu().numpy())
         tracking_dict["rmsd_non_mean"].append(rmsd_non_mean.detach().cpu().numpy())
         argmins = torch.zeros(predicted_images.shape[0])
+
+    tracking_dict["betas"] = loss_weights
 
     return loss, argmins
