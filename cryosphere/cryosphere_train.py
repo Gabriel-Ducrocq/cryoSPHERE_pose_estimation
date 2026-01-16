@@ -96,6 +96,7 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
                 augmented_latent_mean = None
 
             encoded_images_pose = backbone_network.module(flattened_batch_images)
+            encoded_images_pose = torch.concat([encoded_images_pose, latent_variables], dim=-1)
             all_poses_predicted = []
             for head in all_heads.module:
                 predicted_pose = head(encoded_images_pose)
