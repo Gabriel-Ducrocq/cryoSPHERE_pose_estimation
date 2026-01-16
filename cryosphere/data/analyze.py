@@ -340,8 +340,8 @@ def generate_structures_wrapper(rank, world_size, z, base_structure, path_struct
     :param segmenter: segmenter object.
     """
     utils.ddp_setup(rank, world_size)
-    (vae, image_translator, ctf_experiment, grid, gmm_repr, optimizer, dataset, N_epochs, batch_size, experiment_settings, device,
-    scheduler, base_structure, lp_mask2d, mask, amortized, path_results, structural_loss_parameters, segmenter)  = utils.parse_yaml(yaml_setting_path, rank, analyze=True)
+    (vae, backbone_network, all_heads, image_translator, ctf_experiment, grid, gmm_repr, optimizer, dataset, N_epochs, batch_size, experiment_settings, device,
+    scheduler, base_structure, lp_mask2d, mask, amortized, path_results, structural_loss_parameters, segmenter)   = utils.parse_yaml(yaml_setting_path, rank, analyze=True)
     vae.load_state_dict(torch.load(model_path))
     vae.eval()
     segmenter.load_state_dict(torch.load(segmenter_path))
