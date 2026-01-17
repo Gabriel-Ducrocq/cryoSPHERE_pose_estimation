@@ -105,7 +105,8 @@ def start_training(vae, backbone_network, all_heads, image_translator, ctf, grid
             predicted_r6 = all_poses_predicted[:, :, :]
             predicted_r6 = predicted_r6.reshape(batch_size, -1, 3, 2)
             rotation_matrices = roma.special_gramschmidt(predicted_r6)
-            posed_predicted_structures = renderer.rotate_structure(predicted_structures, rotation_matrices)
+            #posed_predicted_structures = renderer.rotate_structure(predicted_structures, rotation_matrices)
+            posed_predicted_structures = renderer.rotate_structure(predicted_structures, batch_poses)
             predicted_images  = renderer.project(posed_predicted_structures, gmm_repr.sigmas, gmm_repr.amplitudes, grid)
             batch_predicted_images = renderer.apply_ctf(predicted_images, ctf, indexes)#/dataset.f_std
             loss, argmins = compute_loss(batch_predicted_images, lp_batch_translated_images, None, latent_mean, latent_std, augmented_latent_mean, vae.module, segmenter.module, experiment_settings, tracking_metrics,
