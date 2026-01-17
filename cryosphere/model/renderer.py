@@ -75,6 +75,9 @@ def rotate_structure(Gauss_mean, rotation_matrices):
     return rotated_Gauss_mean
 
 
+
+
+
 def translate_structure(Gauss_mean, translation_vectors):
     """
     Translate a structure to obtain a posed structure.
