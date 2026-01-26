@@ -194,6 +194,7 @@ def sample_latent_variables(gpu_id, world_size, vae, backbone_network, all_heads
             predicted_pose = head(encoded_images_pose)
             all_poses_predicted.append(predicted_pose[:, None, :])
 
+
         all_poses_predicted = torch.concat(all_poses_predicted, dim=1)
         predicted_r6 = all_poses_predicted[:, :, :]
         predicted_r6 = predicted_r6.reshape(predicted_r6.shape[0], -1, 3, 2)
