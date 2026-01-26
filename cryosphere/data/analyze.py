@@ -19,6 +19,8 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 sys.path.insert(0, abspath(join(dirname(__file__), '..')))
 from cryosphere.model import utils
+from cryosphere.model import renderer
+from cryosphere import model
 
 
 parser_arg = argparse.ArgumentParser()
@@ -145,10 +147,12 @@ def start_sample_latent(rank, world_size,  yaml_setting_path, output_path, model
     backbone_network.load_state_dict(torch.load(backbone_path))
     utils.load_all_heads(heads_path, all_heads)
     all_heads.eval()
-    z = sample_latent_variables(rank, world_size, vae, backbone_network, all_heads, dataset, batch_size, output_path)
+    sample_latent_variables(rank, world_size, vae, backbone_network, all_heads, dataset, batch_size, output_path,
+                                image_translator, lp_mask2d)
     destroy_process_group()
 
-def sample_latent_variables(gpu_id, world_size, vae, backbone_network, all_heads, dataset, batch_size, output_path, num_workers=4):
+def sample_latent_variables(gpu_id, world_size, vae, backbone_network, all_heads, dataset, batch_size, output_path,
+                            image_translator, lp_mask2d, num_workers=4):
     """
     Sample all the latent variables of the dataset and save them in a .npy file
     :param vae: object of class VAE corresponding to the model we want to analyze.
@@ -177,9 +181,10 @@ def sample_latent_variables(gpu_id, world_size, vae, backbone_network, all_heads
         batch_poses = batch_poses.to(gpu_id)
         batch_poses_translation = batch_poses_translation.to(gpu_id)
         indexes = indexes.to(gpu_id)
+        batch_translated_images = image_translator.transform(batch_images, batch_poses_translation[:, None, :])
+        flattened_batch_images = batch_translated_images.flatten(start_dim=-2)
 
-        batch_images = batch_images.flatten(start_dim=-2)
-        latent_variables, latent_mean, latent_std = vae.module.sample_latent(batch_images, indexes)
+        latent_variables, latent_mean, latent_std = vae.module.sample_latent(flattened_batch_images, indexes)
         latent_mean = latent_mean.contiguous()
         indexes = indexes.contiguous()
 
@@ -216,7 +221,6 @@ def sample_latent_variables(gpu_id, world_size, vae, backbone_network, all_heads
             all_latent_variables.append(sorted_batch_latent_mean.detach().cpu().numpy())
             all_rotation_matrices.append(sorted_batch_rotation_matrices.detach().cpu().numpy())
             all_indexes.append(all_gpu_indexes[sorted_batch_indexes].detach().cpu().numpy())
-            print("SIZE", sorted_batch_rotation_matrices.shape)
 
 
     if gpu_id == 0:
