@@ -20,7 +20,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 sys.path.insert(0, abspath(join(dirname(__file__), '..')))
 from cryosphere.model import utils
 from cryosphere.model import renderer
-from cryosphere import model
+from cryosphere.model import loss
 
 
 parser_arg = argparse.ArgumentParser()
@@ -41,13 +41,14 @@ parser_arg.add_argument('--generate_structures', action=argparse.BooleanOptional
 
 
 class LatentDataSet(Dataset):
-    def __init__(self, z):
+    def __init__(self, z, rotations):
         """
         Create a dataset of images and poses
         :param z: latent variable to decode into structures
+        :param rotations: torch.tensor(N_images, N_heads, 3, 3)
         """
-
         self.z = z
+        self.rotations = rotations
 
     def __len__(self):
         return self.z.shape[0]
@@ -59,7 +60,7 @@ class LatentDataSet(Dataset):
         # the corresponding poses rotation matrices as torch.tensor((batch_size, 3, 3)), the corresponding poses translations as torch.tensor((batch_size, 2))
         # NOTA BENE: the convention for the rotation matrix is left multiplication of the coordinates of the atoms of the protein !!
         """
-        return idx, self.z[idx]
+        return idx, self.z[idx], self.rotations[idx]
 
 
 
@@ -199,6 +200,7 @@ def sample_latent_variables(gpu_id, world_size, vae, backbone_network, all_heads
         predicted_r6 = all_poses_predicted[:, :, :]
         predicted_r6 = predicted_r6.reshape(predicted_r6.shape[0], -1, 3, 2)
         rotation_matrices = roma.special_gramschmidt(predicted_r6)
+
         if gpu_id == 0:
             batch_latent_mean_list = [torch.zeros_like(latent_mean, device=latent_mean.device).contiguous() for _ in range(world_size)]
             batch_indexes = [torch.zeros_like(indexes, device=batch_images.device).contiguous() for _ in range(world_size)]
@@ -335,12 +337,13 @@ def run_pca_analysis(vae, z, dimensions, num_points, output_path, gmm_repr, base
             save_structures_pca(predicted_structures, 0, output_path, base_structure)
 
 
-def generate_structures_wrapper(rank, world_size, z, base_structure, path_structures, batch_size, gmm_repr, yaml_setting_path, model_path, segmenter_path):
+def generate_structures_wrapper(rank, world_size, z, rotation_poses, base_structure, path_structures, batch_size, gmm_repr, yaml_setting_path, model_path, segmenter_path):
     """
     Wrapper function to decode the latent variable in parallel
     :param rank: integer, rank of the device
     :param world_size: integer, number of devices
     :param z: torch.tensor(N_latent, latent_dim) latent variable from which we want to output images.
+    :param rotation_poses: torch.tensor(N_latent, N_heads, 3, 3)
     :param vae: vae object.
     :param segmenter: segmenter object.
     """
@@ -351,18 +354,62 @@ def generate_structures_wrapper(rank, world_size, z, base_structure, path_struct
     vae.eval()
     segmenter.load_state_dict(torch.load(segmenter_path))
     segmenter.eval()
-    latent_variable_dataset = LatentDataSet(z)
-    generate_structures(rank, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr)
+    latent_variable_dataset = LatentDataSet(z, rotation_poses)
+    generate_structures(rank, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr, grid)
     destroy_process_group()
 
-def generate_structures(rank, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr):
+def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr, grid, ctf, dataset_images, argmins_path, cross_corr_path, generate_structures=False):
     vae = DDP(vae, device_ids=[rank])
     segmenter = DDP(segmenter, device_ids=[rank])
     latent_variables_loader = iter(DataLoader(latent_variable_dataset, shuffle=False, batch_size=batch_size, num_workers=4, drop_last=False, sampler=DistributedSampler(latent_variable_dataset, shuffle=False)))
-    for batch_num, (indexes, z) in enumerate(latent_variables_loader): 
+    all_rmsd = []
+    all_argmins = []
+    for batch_num, (indexes, z, rotation_pose) in enumerate(latent_variables_loader):
         z = z.to(rank)
         predicted_structures = predict_structures(vae.module, z, gmm_repr, segmenter.module, rank)
-        save_structures(predicted_structures, base_structure, batch_num, path_structures, batch_size, indexes)
+        posed_predicted_structures = renderer.rotate_structure(predicted_structures, rotation_pose)
+        predicted_images = renderer.project(posed_predicted_structures, gmm_repr.sigmas, gmm_repr.amplitudes, grid, ctf)
+        batch_predicted_images = renderer.apply_ctf(predicted_images, ctf, indexes)  # /dataset.f_std
+        _, images, _, _ , _ = dataset_images[indexes]
+        #thE NONE IS SUPPOSED to BE THE MASK ON THE IMAGE
+        rmsd, argmins, rmsd_non_mean = loss.calc_cor_loss(predicted_images, images, None)
+
+        if rank == 0:
+            batch_rmsd = [torch.zeros_like(rmsd, device=rmsd.device).contiguous() for _ in range(world_size)]
+            batch_indexes = [torch.zeros_like(indexes, device=rotation_pose.device).contiguous() for _ in range(world_size)]
+            batch_argmins = [torch.zeros_like(argmins, device=rotation_pose.device).contiguous()
+                                       for _ in range(world_size)]
+            gather(rmsd, batch_rmsd)
+            gather(indexes, batch_indexes)
+            gather(argmins, batch_argmins)
+        else:
+            gather(batch_rmsd)
+            gather(indexes)
+            gather(argmins)
+
+
+        if rank == 0:
+            all_gpu_indexes = torch.concat(batch_indexes, dim=0)
+            all_gpu_rmsd = torch.concat(batch_rmsd, dim=0)
+            all_gpu_argmins = torch.concat(batch_argmins, dim=0)
+            sorted_batch_indexes = torch.argsort(all_gpu_indexes, dim=0)
+            sorted_batch_rmsd = all_gpu_rmsd[sorted_batch_indexes]
+            sorted_batch_argmins = all_gpu_argmins[sorted_batch_indexes]
+            all_gpu_rmsd.append(sorted_batch_rmsd.detach().cpu().numpy())
+            all_gpu_argmins.append(sorted_batch_argmins.detach().cpu().numpy())
+            all_indexes.append(all_gpu_indexes[sorted_batch_indexes].detach().cpu().numpy())
+
+    if rank == 0:
+        all_rmsd = np.concatenate(all_gpu_rmsd, axis=0)
+        cross_corr_path = os.path.join(cross_corr_path, "cross_corr.npy")
+        np.save(cross_corr_path, all_rmsd)
+
+        all_argmins = np.concatenate(all_gpu_argmins, axis=0)
+        argmins_path = os.path.join(argmins_path, "argmin.npy")
+        np.save(argmins_path, all_argmins)
+
+        if generate_structures:
+            save_structures(predicted_structures, base_structure, batch_num, path_structures, batch_size, indexes)
 
 
 def analyze(yaml_setting_path, model_path, segmenter_path, backbone_path, heads_path, output_path, z, thinning=1,

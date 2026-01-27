@@ -19,7 +19,7 @@ import pandas as pd
 from tqdm import tqdm
 import torch.nn.functional as F
 from scipy.spatial import distance
-from cryospheremodel.vae import VAE
+from cryosphere.model.vae import VAE
 from cryosphere.model.mlp import MLP, MLPPose
 from cryosphere.model.ctf import CTF
 from biotite.structure.io.pdb import PDBFile
