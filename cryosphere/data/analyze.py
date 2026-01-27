@@ -380,6 +380,7 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
         print("INDEXES SHAPE", indexes.shape)
         print(indexes)
         _, images, _, _ , _ = dataset_images[int(indexes[0].detach().cpu().numpy())]
+        images = images.to(rank)
         rmsd, argmins, rmsd_non_mean = loss.calc_cor_loss(batch_predicted_images, images, mask_image)
 
         if rank == 0:
