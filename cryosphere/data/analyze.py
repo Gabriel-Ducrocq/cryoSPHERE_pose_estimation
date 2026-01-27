@@ -189,7 +189,7 @@ def sample_latent_variables(gpu_id, world_size, vae, backbone_network, all_heads
         latent_mean = latent_mean.contiguous()
         indexes = indexes.contiguous()
 
-        encoded_images_pose = backbone_network.module(batch_images)
+        encoded_images_pose = backbone_network.module(flattened_batch_images)
         all_poses_predicted = []
         for head in all_heads.module:
             predicted_pose = head(encoded_images_pose)
