@@ -37,6 +37,8 @@ parser_arg.add_argument("--num_points", type=int, required=False, default= 20, h
 parser_arg.add_argument('--dimensions','--list', nargs='+', type=int, default= [0, 1, 2], help='<Required> PC dimensions along which we compute the trajectories. If not set, use pc 1, 2, 3', required=False)
 parser_arg.add_argument('--generate_structures', action=argparse.BooleanOptionalAction, default= False, help="""If False: run a PCA analysis with PCA traversal. If True,
                             generates the structures corresponding to the latent variables given in z.""")
+parser_arg.add_argument('--generate_argmins', action=argparse.BooleanOptionalAction, default= False, help="""If False: do not get the argmins as these require that we compute the loss, which is computationally more costly. If True,
+                            generates both the rmsd and the argmin.""")
 
 
 
@@ -337,7 +339,7 @@ def run_pca_analysis(vae, z, dimensions, num_points, output_path, gmm_repr, base
             save_structures_pca(predicted_structures, 0, output_path, base_structure)
 
 
-def generate_structures_wrapper(rank, world_size, z, rotation_poses, base_structure, path_structures, batch_size, gmm_repr, yaml_setting_path, model_path, segmenter_path):
+def compute_losses_argmin_wrapper(rank, world_size, z, rotation_poses, base_structure, path_structures, batch_size, gmm_repr, yaml_setting_path, model_path, segmenter_path, generate_structures, generate_argmins):
     """
     Wrapper function to decode the latent variable in parallel
     :param rank: integer, rank of the device
@@ -355,10 +357,11 @@ def generate_structures_wrapper(rank, world_size, z, rotation_poses, base_struct
     segmenter.load_state_dict(torch.load(segmenter_path))
     segmenter.eval()
     latent_variable_dataset = LatentDataSet(z, rotation_poses)
-    generate_structures(rank, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr, grid)
+    compute_losses_argmin(rank, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr, grid, ctf_experiment, dataset, mask, generate_structures, generate_argmins)
     destroy_process_group()
 
-def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr, grid, ctf, dataset_images, argmins_path, cross_corr_path, generate_structures=False):
+def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr, grid, ctf, dataset_images, mask_image,
+                          generate_structures=False, generate_argmins=False):
     vae = DDP(vae, device_ids=[rank])
     segmenter = DDP(segmenter, device_ids=[rank])
     latent_variables_loader = iter(DataLoader(latent_variable_dataset, shuffle=False, batch_size=batch_size, num_workers=4, drop_last=False, sampler=DistributedSampler(latent_variable_dataset, shuffle=False)))
@@ -371,8 +374,7 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
         predicted_images = renderer.project(posed_predicted_structures, gmm_repr.sigmas, gmm_repr.amplitudes, grid, ctf)
         batch_predicted_images = renderer.apply_ctf(predicted_images, ctf, indexes)  # /dataset.f_std
         _, images, _, _ , _ = dataset_images[indexes]
-        #thE NONE IS SUPPOSED to BE THE MASK ON THE IMAGE
-        rmsd, argmins, rmsd_non_mean = loss.calc_cor_loss(predicted_images, images, None)
+        rmsd, argmins, rmsd_non_mean = loss.calc_cor_loss(predicted_images, images, mask_image)
 
         if rank == 0:
             batch_rmsd = [torch.zeros_like(rmsd, device=rmsd.device).contiguous() for _ in range(world_size)]
@@ -397,23 +399,23 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
             sorted_batch_argmins = all_gpu_argmins[sorted_batch_indexes]
             all_gpu_rmsd.append(sorted_batch_rmsd.detach().cpu().numpy())
             all_gpu_argmins.append(sorted_batch_argmins.detach().cpu().numpy())
-            all_indexes.append(all_gpu_indexes[sorted_batch_indexes].detach().cpu().numpy())
 
     if rank == 0:
-        all_rmsd = np.concatenate(all_gpu_rmsd, axis=0)
-        cross_corr_path = os.path.join(cross_corr_path, "cross_corr.npy")
-        np.save(cross_corr_path, all_rmsd)
+        if generate_argmins:
+            all_rmsd = np.concatenate(all_gpu_rmsd, axis=0)
+            cross_corr_path = os.path.join(path_structures, "cross_corr.npy")
+            np.save(cross_corr_path, all_rmsd)
 
-        all_argmins = np.concatenate(all_gpu_argmins, axis=0)
-        argmins_path = os.path.join(argmins_path, "argmin.npy")
-        np.save(argmins_path, all_argmins)
+            all_argmins = np.concatenate(path_structures, axis=0)
+            argmins_path = os.path.join(path_structures, "argmin.npy")
+            np.save(argmins_path, all_argmins)
 
         if generate_structures:
             save_structures(predicted_structures, base_structure, batch_num, path_structures, batch_size, indexes)
 
 
 def analyze(yaml_setting_path, model_path, segmenter_path, backbone_path, heads_path, output_path, z, thinning=1,
-            dimensions=[0, 1, 2], num_points=10, generate_structures=False):
+            dimensions=[0, 1, 2], num_points=10, generate_structures=False, generate_argmins= False):
     """
     train a VAE network
     :param yaml_setting_path: str, path the yaml containing all the details of the experiment.
@@ -446,18 +448,18 @@ def analyze(yaml_setting_path, model_path, segmenter_path, backbone_path, heads_
         latent_path = os.path.join(output_path, "z.npy")
         z = np.load(latent_path)
 
-    if not generate_structures:
+    if not generate_structures and not generate_argmins:
         run_pca_analysis(vae, z, dimensions, num_points, output_path, gmm_repr, base_structure, thinning, segmenter,
                          device=device)
 
-    else:
+    elif (generate_structures and not generate_argmins) or generate_argmins:
         path_structures = os.path.join(output_path, "predicted_structures")
         if not os.path.exists(path_structures):
             os.makedirs(path_structures)
 
         z = torch.tensor(z, dtype=torch.float32)
         latent_variable_dataset = LatentDataSet(z)
-        mp.spawn(generate_structures_wrapper, args=(world_size, z, base_structure, path_structures, batch_size, gmm_repr, yaml_setting_path, model_path, segmenter_path), nprocs=world_size)
+        mp.spawn(generate_structures_wrapper, args=(world_size, z, base_structure, path_structures, batch_size, gmm_repr, yaml_setting_path, model_path, segmenter_path, generate_structures, generate_argmins), nprocs=world_size)
 
 
 def analyze_run():
@@ -476,8 +478,9 @@ def analyze_run():
         z = np.load(args.z)
         
     generate_structures = args.generate_structures
+    generate_argmins = args.generate_argmins
     analyze(path, model_path, segmenter_path, backbone_path, heads_path, output_path, z, dimensions=dimensions,
-            generate_structures=generate_structures, thinning=thinning, num_points=num_points)
+            generate_structures=generate_structures, thinning=thinning, num_points=num_points, generate_argmins = generate_argmins)
 
 
 if __name__ == '__main__':
