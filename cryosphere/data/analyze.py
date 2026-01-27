@@ -386,7 +386,8 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
         flattened_batch_images = batch_translated_images.flatten(start_dim=-2)
         print("IMAGES1", flattened_batch_images.shape)
         print("IMAGES2", batch_predicted_images.shape)
-        rmsd, argmins, rmsd_non_mean = loss.calc_cor_loss(batch_predicted_images, flattened_batch_images, mask_image)
+        ######### BE CAREFUL WITH THE MASK HERE !!!!!!!!!!!!
+        rmsd, argmins, rmsd_non_mean = loss.calc_cor_loss(batch_predicted_images, flattened_batch_images, None)
 
         if rank == 0:
             batch_rmsd = [torch.zeros_like(rmsd, device=rmsd.device).contiguous() for _ in range(world_size)]
