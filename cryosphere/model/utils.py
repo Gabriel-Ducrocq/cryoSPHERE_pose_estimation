@@ -36,7 +36,6 @@ import roma
 from roma import unitquat_to_rotvec, rotvec_to_rotmat, rotvec_to_unitquat
 
 
-
 def ddp_setup(rank: int, world_size: int):
    """
    Args:
