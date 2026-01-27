@@ -358,10 +358,10 @@ def compute_losses_argmin_wrapper(rank, world_size, z, rotation_poses, base_stru
     segmenter.load_state_dict(torch.load(segmenter_path))
     segmenter.eval()
     latent_variable_dataset = LatentDataSet(z, rotation_poses)
-    compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr, grid, ctf_experiment, dataset, mask, generate_structures, generate_argmins)
+    compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr, grid, ctf_experiment, dataset, mask, image_translator, generate_structures, generate_argmins)
     destroy_process_group()
 
-def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr, grid, ctf, dataset_images, mask_image,
+def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr, grid, ctf, dataset_images, mask_image, image_translator,
                           generate_structures=False, generate_argmins=False):
     vae = DDP(vae, device_ids=[rank])
     segmenter = DDP(segmenter, device_ids=[rank])
@@ -379,10 +379,13 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
         batch_predicted_images = renderer.apply_ctf(predicted_images, ctf, indexes)  # /dataset.f_std
         print("INDEXES SHAPE", indexes.shape)
         print(indexes)
-        _, images, _, _ , _ = dataset_images[int(indexes[0].detach().cpu().numpy())]
+        _, images, _, batch_poses_translation , _ = dataset_images[int(indexes[0].detach().cpu().numpy())]
+        batch_translated_images = image_translator.transform(images[None], batch_poses_translation[:, None, :])
+        flattened_batch_images = batch_translated_images.flatten(start_dim=-2)
+
         images = images.to(rank)
         print("IMAGES", images.shape)
-        rmsd, argmins, rmsd_non_mean = loss.calc_cor_loss(batch_predicted_images, images, mask_image)
+        rmsd, argmins, rmsd_non_mean = loss.calc_cor_loss(batch_predicted_images, flattened_batch_images, mask_image)
 
         if rank == 0:
             batch_rmsd = [torch.zeros_like(rmsd, device=rmsd.device).contiguous() for _ in range(world_size)]
@@ -405,16 +408,16 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
             sorted_batch_indexes = torch.argsort(all_gpu_indexes, dim=0)
             sorted_batch_rmsd = all_gpu_rmsd[sorted_batch_indexes]
             sorted_batch_argmins = all_gpu_argmins[sorted_batch_indexes]
-            all_gpu_rmsd.append(sorted_batch_rmsd.detach().cpu().numpy())
-            all_gpu_argmins.append(sorted_batch_argmins.detach().cpu().numpy())
+            all_rmsd.append(sorted_batch_rmsd.detach().cpu().numpy())
+            all_argmins.append(sorted_batch_argmins.detach().cpu().numpy())
 
     if rank == 0:
         if generate_argmins:
-            all_rmsd = np.concatenate(all_gpu_rmsd, axis=0)
+            all_rmsd = np.concatenate(all_rmsd, axis=0)
             cross_corr_path = os.path.join(path_structures, "cross_corr.npy")
             np.save(cross_corr_path, all_rmsd)
 
-            all_argmins = np.concatenate(path_structures, axis=0)
+            all_argmins = np.concatenate(all_argmins, axis=0)
             argmins_path = os.path.join(path_structures, "argmin.npy")
             np.save(argmins_path, all_argmins)
 
