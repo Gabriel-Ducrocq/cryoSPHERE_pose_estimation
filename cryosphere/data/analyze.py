@@ -380,8 +380,7 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
         print("INDEXES SHAPE", indexes.shape)
         print(indexes)
         _, images, _, batch_poses_translation , _ = dataset_images[int(indexes[0].detach().cpu().numpy())]
-        print("TRANS", batch_poses_translation.shape)
-        batch_translated_images = image_translator.transform(images[None], batch_poses_translation[:, None, :])
+        batch_translated_images = image_translator.transform(images[None], batch_poses_translation[None, None, :])
         flattened_batch_images = batch_translated_images.flatten(start_dim=-2)
 
         images = images.to(rank)
