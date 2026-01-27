@@ -358,7 +358,7 @@ def compute_losses_argmin_wrapper(rank, world_size, z, rotation_poses, base_stru
     segmenter.load_state_dict(torch.load(segmenter_path))
     segmenter.eval()
     latent_variable_dataset = LatentDataSet(z, rotation_poses)
-    compute_losses_argmin(rank, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr, grid, ctf_experiment, dataset, mask, generate_structures, generate_argmins)
+    compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr, grid, ctf_experiment, dataset, mask, generate_structures, generate_argmins)
     destroy_process_group()
 
 def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path_structures, latent_variable_dataset, batch_size, gmm_repr, grid, ctf, dataset_images, mask_image,
