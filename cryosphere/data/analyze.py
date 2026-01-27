@@ -31,6 +31,7 @@ parser_arg.add_argument('--heads_path', type=str, required=True, help="path to t
 parser_arg.add_argument("--segmenter", type=str, required=True, help="path to the segmenter we want to analyze")
 parser_arg.add_argument("--output_path", type=str, required=True, help="path of the directory to save the results")
 parser_arg.add_argument("--z", type=str, required=False, help="path of the latent variables in npy format, if we already have them")
+parser_arg.add_argument("--rotation_path", type=str, required=False, help="path of the predicted_rotations in npy format, optional")
 parser_arg.add_argument("--thinning", type=int, required=False, default= 1,  help="""thinning to apply on the latent variables to perform the PCA analysis: if there are too many images,
                         the PCA may take a long time, hence thinning might be needed. For example, thinning = 10 takes one latent variable out of ten for the PCA analysis.""")
 parser_arg.add_argument("--num_points", type=int, required=False, default= 20, help="Number of points to generate for the PC traversals")
@@ -414,7 +415,7 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
             save_structures(predicted_structures, base_structure, batch_num, path_structures, batch_size, indexes)
 
 
-def analyze(yaml_setting_path, model_path, segmenter_path, backbone_path, heads_path, output_path, z, thinning=1,
+def analyze(yaml_setting_path, model_path, segmenter_path, backbone_path, heads_path, output_path, z, rotation_poses, thinning=1,
             dimensions=[0, 1, 2], num_points=10, generate_structures=False, generate_argmins= False):
     """
     train a VAE network
@@ -452,14 +453,13 @@ def analyze(yaml_setting_path, model_path, segmenter_path, backbone_path, heads_
         run_pca_analysis(vae, z, dimensions, num_points, output_path, gmm_repr, base_structure, thinning, segmenter,
                          device=device)
 
-    elif (generate_structures and not generate_argmins) or generate_argmins:
+    elif (generate_structures and not generate_argmins) or (generate_argmins and rotation_poses is not None):
         path_structures = os.path.join(output_path, "predicted_structures")
         if not os.path.exists(path_structures):
             os.makedirs(path_structures)
 
         z = torch.tensor(z, dtype=torch.float32)
-        latent_variable_dataset = LatentDataSet(z)
-        mp.spawn(generate_structures_wrapper, args=(world_size, z, base_structure, path_structures, batch_size, gmm_repr, yaml_setting_path, model_path, segmenter_path, generate_structures, generate_argmins), nprocs=world_size)
+        mp.spawn(compute_losses_argmin_wrapper(), args=(world_size, z, rotation_poses, base_structure, path_structures, batch_size, gmm_repr, yaml_setting_path, model_path, segmenter_path, generate_structures, generate_argmins), nprocs=world_size)
 
 
 def analyze_run():
@@ -476,10 +476,14 @@ def analyze_run():
     z = None
     if args.z is not None:
         z = np.load(args.z)
+
+    rotation_poses = None
+    if args.rotation_path is not None:
+        rotation_poses = np.load(args.rotation_path)
         
     generate_structures = args.generate_structures
     generate_argmins = args.generate_argmins
-    analyze(path, model_path, segmenter_path, backbone_path, heads_path, output_path, z, dimensions=dimensions,
+    analyze(path, model_path, segmenter_path, backbone_path, heads_path, output_path, z, rotation_poses, dimensions=dimensions,
             generate_structures=generate_structures, thinning=thinning, num_points=num_points, generate_argmins = generate_argmins)
 
 
