@@ -370,6 +370,7 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
     all_argmins = []
     for batch_num, (indexes, z, rotation_pose) in enumerate(latent_variables_loader):
         z = z.to(rank)
+        rotation_pose = rotation_pose.to(rank)
         predicted_structures = predict_structures(vae.module, z, gmm_repr, segmenter.module, rank)
         posed_predicted_structures = renderer.rotate_structure(predicted_structures, rotation_pose)
         predicted_images = renderer.project(posed_predicted_structures, gmm_repr.sigmas, gmm_repr.amplitudes, grid, ctf)
