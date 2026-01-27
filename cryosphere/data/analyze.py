@@ -381,10 +381,9 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
         print(indexes)
         _, images, _, batch_poses_translation , _ = dataset_images[int(indexes[0].detach().cpu().numpy())]
         batch_poses_translation = batch_poses_translation.to(rank)
+        images = images.to(rank)
         batch_translated_images = image_translator.transform(images[None], batch_poses_translation[None, None, :])
         flattened_batch_images = batch_translated_images.flatten(start_dim=-2)
-
-        images = images.to(rank)
         print("IMAGES", images.shape)
         rmsd, argmins, rmsd_non_mean = loss.calc_cor_loss(batch_predicted_images, flattened_batch_images, mask_image)
 
