@@ -459,7 +459,7 @@ def analyze(yaml_setting_path, model_path, segmenter_path, backbone_path, heads_
             os.makedirs(path_structures)
 
         z = torch.tensor(z, dtype=torch.float32)
-        mp.spawn(compute_losses_argmin_wrapper(), args=(world_size, z, rotation_poses, base_structure, path_structures, batch_size, gmm_repr, yaml_setting_path, model_path, segmenter_path, generate_structures, generate_argmins), nprocs=world_size)
+        mp.spawn(compute_losses_argmin_wrapper, args=(world_size, z, rotation_poses, base_structure, path_structures, batch_size, gmm_repr, yaml_setting_path, model_path, segmenter_path, generate_structures, generate_argmins), nprocs=world_size)
 
 
 def analyze_run():
