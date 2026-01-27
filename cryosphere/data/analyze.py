@@ -365,6 +365,7 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
                           generate_structures=False, generate_argmins=False):
     vae = DDP(vae, device_ids=[rank])
     segmenter = DDP(segmenter, device_ids=[rank])
+    mask_image = mask_image.to(rank)
     latent_variables_loader = iter(DataLoader(latent_variable_dataset, shuffle=False, batch_size=1, num_workers=4, drop_last=False, sampler=DistributedSampler(latent_variable_dataset, shuffle=False)))
     all_rmsd = []
     all_argmins = []
