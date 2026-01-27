@@ -182,6 +182,8 @@ class ImageDataSet(Dataset):
         # the corresponding poses rotation matrices as torch.tensor((batch_size, 3, 3)), the corresponding poses translations as torch.tensor((batch_size, 2))
         # NOTA BENE: the convention for the rotation matrix is left multiplication of the coordinates of the atoms of the protein !!
         """
+        print(idx)
+        print("INDEXES INSIDE", idx.shape)
         #try:
         if self.pose_file_extension == "star":
             particles = self.particles_df.iloc[idx]
