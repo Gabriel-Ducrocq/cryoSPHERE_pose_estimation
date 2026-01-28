@@ -379,7 +379,7 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
         rotation_pose = rotation_pose.to(rank)
         images = images.to(rank)
         batch_poses_translation = batch_poses_translation.to(rank)
-        batch_translated_images = image_translator.transform(images[None], batch_poses_translation[None, None, :])
+        batch_translated_images = image_translator.transform(images, batch_poses_translation[:, None, :])
         predicted_structures = predict_structures(vae.module, z, gmm_repr, segmenter.module, rank)
         posed_predicted_structures = renderer.rotate_structure(predicted_structures, rotation_pose)
         predicted_images = renderer.project(posed_predicted_structures, gmm_repr.sigmas, gmm_repr.amplitudes, grid)
