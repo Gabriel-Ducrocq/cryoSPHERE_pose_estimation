@@ -1,4 +1,6 @@
 import os
+from operator import getitem
+
 import torch
 import mrcfile
 import starfile
@@ -98,7 +100,8 @@ def cs_file_reader(cs_file_path, apix, abinit, hetrefine):
 
 
 class ImageDataSet(Dataset):
-    def __init__(self, apix, side_shape, star_cs_file_config, particles_path, down_side_shape=None, down_method="interp", rad_mask=None):
+    def __init__(self, apix, side_shape, star_cs_file_config, particles_path, down_side_shape=None, down_method="interp",
+                 rad_mask=None, latent_variables=None, predicted_rotation_poses=None, train_mode = True):
         """
         Create a dataset of images and poses
         :param apix: float, size of a pixel in Å.
@@ -108,8 +111,12 @@ class ImageDataSet(Dataset):
         :param down_side_shape: integer, number of pixels of the downsampled images. If no downampling, set down_side_shape = side_shape. 
         :param down_method: str, downsampling method to use if down_side_shape < side_shape. Currently only interp is supported.
         :param rad_mask: float, radius of the mask used on the input image. If None, no mask is used.
+        :param latent_variables: torch.tensor(N_samples, latent_dim)
+        :param predicted_rotation_poses: torch.tensor(N_samples, N_heads, 3, 3)
         """
-
+        self.train_mode = train_mode
+        self.latent_variables = latent_variables
+        self.predicted_rotation_poses = predicted_rotation_poses
         self.side_shape = side_shape
         self.down_method = down_method
         self.apix = apix
@@ -145,6 +152,12 @@ class ImageDataSet(Dataset):
         self.f_mu = None
         #self.estimate_normalization()
 
+    def set_latent_variables(self, z):
+        self.latent_variables = z
+
+    def set_rotation_poses(self, rotation_matrices):
+        self.predicted_rotation_poses = rotation_matrices
+
     def standardize_corner(self, images, epsilon=1e-5):
         """
         For each image separately, computes the mean and variances based on the corner pixels
@@ -176,6 +189,15 @@ class ImageDataSet(Dataset):
         return self.particles_df.shape[0]
 
     def __getitem__(self, idx):
+        idx, proj, poses, poses_translation, fproj = self.getitem_training(idx)
+        if self.train_mode:
+            return idx, proj, poses, poses_translation, fproj
+        else:
+            return idx, proj, poses_translation, self.latent_variables[idx], self.predicted_rotation_poses[idx]
+
+
+
+    def getitem_training(self, idx):
         """
         #Return a batch of true images, as 2d array
         # return: the set of indexes queried for the batch, the corresponding images as a torch.tensor((batch_size, side_shape, side_shape)), 
