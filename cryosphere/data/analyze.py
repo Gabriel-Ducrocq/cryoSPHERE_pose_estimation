@@ -398,17 +398,14 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
             gather(indexes, batch_indexes)
             gather(argmins, batch_argmins)
         else:
-            gather(batch_rmsd)
-            gather(batch_indexes)
-            gather(batch_argmins)
+            gather(rmsd)
+            gather(indexes)
+            gather(argmins)
 
 
         if rank == 0:
-            print(batch_rmsd[0].shape)
-            print(batch_rmsd[0])
-            print(batch_rmsd)
             all_gpu_indexes = torch.concat(batch_indexes, dim=0)
-            all_gpu_rmsd = torch.concat([batch_rmsd], dim=0)
+            all_gpu_rmsd = torch.concat(batch_rmsd, dim=0)
             all_gpu_argmins = torch.concat(batch_argmins, dim=0)
             sorted_batch_indexes = torch.argsort(all_gpu_indexes, dim=0)
             sorted_batch_rmsd = all_gpu_rmsd[sorted_batch_indexes]
