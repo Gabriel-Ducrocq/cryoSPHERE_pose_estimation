@@ -404,6 +404,8 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
 
 
         if rank == 0:
+            print(batch_rmsd[0].shape)
+            print(batch_rmsd[0])
             all_gpu_indexes = torch.concat(batch_indexes, dim=0)
             all_gpu_rmsd = torch.concat(batch_rmsd, dim=0)
             all_gpu_argmins = torch.concat(batch_argmins, dim=0)
