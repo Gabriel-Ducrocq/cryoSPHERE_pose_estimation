@@ -416,8 +416,10 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
             all_rmsd.append(sorted_batch_rmsd.detach().cpu().numpy())
             all_argmins.append(sorted_batch_argmins.detach().cpu().numpy())
 
+    print("AAAAAAAAAAA")
     if rank == 0:
         if generate_argmins:
+            print("BBBBBBBBBB")
             all_rmsd = np.concatenate(all_rmsd, axis=0)
             cross_corr_path = os.path.join(path_structures, "cross_corr.npy")
             np.save(cross_corr_path, all_rmsd)
