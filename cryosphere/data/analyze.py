@@ -386,20 +386,20 @@ def compute_losses_argmin(rank, world_size, vae, segmenter, base_structure, path
         batch_predicted_images = renderer.apply_ctf(predicted_images, ctf, indexes)  # /dataset.f_std
         ######### BE CAREFUL WITH THE MASK HERE !!!!!!!!!!!!
         rmsd, argmins, rmsd_non_mean = loss.calc_cor_loss(batch_predicted_images, batch_translated_images, None)
-
+        print(rmsd)
         print(images.shape)
         print(batch_predicted_images.shape)
 
         if rank == 0:
-            batch_rmsd = [torch.zeros_like(rmsd, device=rmsd.device).contiguous() for _ in range(world_size)]
+            batch_rmsd = [torch.zeros_like(rmsd_non_mean, device=rmsd.device).contiguous() for _ in range(world_size)]
             batch_indexes = [torch.zeros_like(indexes, device=rotation_pose.device).contiguous() for _ in range(world_size)]
             batch_argmins = [torch.zeros_like(argmins, device=rotation_pose.device).contiguous()
                                        for _ in range(world_size)]
-            gather(rmsd, batch_rmsd)
+            gather(rmsd_non_mean, batch_rmsd)
             gather(indexes, batch_indexes)
             gather(argmins, batch_argmins)
         else:
-            gather(rmsd)
+            gather(rmsd_non_mean)
             gather(indexes)
             gather(argmins)
 
